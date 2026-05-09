@@ -11,8 +11,9 @@ All tools communicate over stdio with the `mcp-bun-debug` server.
 1. debug_launch            → get session_id; note the initial pause location
 2. debug_set_breakpoint    → set breakpoints in YOUR script (not the built-in the process is currently paused in)
 3. debug_continue          → run to your first breakpoint
-4. debug_list_variables / debug_get_variable / debug_step_over / ...
-5. debug_quit when done
+4. debug_backtrace         → confirm you're in the right place after any step or continue
+5. debug_list_variables / debug_get_variable / debug_step_over / ...
+6. debug_quit when done
 ```
 
 **Critical:** after launch the process is paused inside the first loaded module, which may be
@@ -151,6 +152,8 @@ Execute the current line and pause at the next line in the same function.
 **Inputs:** `session_id`  
 **Returns:** `Paused at <file>:<line> in <function>()  (reason: other)`
 
+**Note:** The result only shows the top frame. If you land somewhere unexpected, call `debug_backtrace` immediately to see the full call stack.
+
 ---
 
 ### `debug_step_into`
@@ -159,7 +162,7 @@ Step into the function call on the current line.
 **Inputs:** `session_id`  
 **Returns:** `Paused at <file>:<line> in <function>()  (reason: other)` — inside the callee
 
-**Note:** Stepping into a native or built-in function may land in internal runtime code. Use `debug_step_out` to return to your script.
+**Note:** Stepping into a native or built-in function may land in internal runtime code. Call `debug_backtrace` to orient yourself, then use `debug_step_out` to return to your script.
 
 ---
 
@@ -168,6 +171,29 @@ Run to the end of the current function and pause at the call site.
 
 **Inputs:** `session_id`  
 **Returns:** `Paused at <file>:<line> in <function>()  (reason: other)` — back in the caller
+
+---
+
+### `debug_backtrace`
+Print the full call stack at the current pause point. Use this after any step command to confirm exactly where execution has landed, especially when the location is unexpected.
+
+**Inputs:** `session_id`
+
+**Returns:**
+```
+Call stack (4 frames):
+  #0  greet  —  /workspace/project/src/utils.ts:8:2
+  #1  module code  —  /workspace/project/src/index.ts:12:20
+  #2  module code  —  /workspace/project/src/index.ts:4:0
+  #3  (anonymous)  —  bun:main:6:0
+```
+
+Frame `#0` is where execution is paused. Each line shows: frame index, function name, file path, line, and column.
+
+**When to use:**
+- After `debug_step_into` to confirm you entered the right function
+- After `debug_step_over` lands on an unexpected line
+- Any time you're disoriented about the current execution context
 
 ---
 
@@ -197,10 +223,11 @@ debug_quit session_id=abc123
 ```
 debug_set_breakpoint session_id=abc123 file=src/process.ts line=20
 debug_continue session_id=abc123
+debug_backtrace session_id=abc123           # confirm we're at the right frame
 debug_list_variables session_id=abc123      # see initial state
 debug_step_over session_id=abc123           # execute line 20
+debug_backtrace session_id=abc123           # confirm location after step
 debug_list_variables session_id=abc123      # see updated state
-debug_step_over session_id=abc123
 debug_get_variable session_id=abc123 expression=result
 ```
 

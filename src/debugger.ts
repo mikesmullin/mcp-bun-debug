@@ -335,6 +335,21 @@ export class BunDebugSession {
     return formatRemoteObject(res.result as RemoteObject);
   }
 
+  backtrace(): Array<{ frame: number; file: string; line: number; column: number; function: string }> {
+    if (!this.pausedState) throw new Error('Not paused');
+    return this.pausedState.callFrames.map((frame, i) => {
+      const url = this.scripts.get(frame.location.scriptId) ?? '';
+      const file = url.replace('file://', '');
+      return {
+        frame: i,
+        file,
+        line: frame.location.lineNumber + 1,
+        column: frame.location.columnNumber,
+        function: frame.functionName || '(anonymous)',
+      };
+    });
+  }
+
   currentLocation(): { file: string; line: number; function: string } | undefined {
     if (!this.pausedState) return undefined;
     const frame = this.pausedState.callFrames[0];

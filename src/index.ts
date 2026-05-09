@@ -117,6 +117,15 @@ const TOOLS: Tool[] = [
     },
   },
   {
+    name: 'debug_backtrace',
+    description: 'Show the full call stack at the current pause point — use this after any step command to confirm where execution landed.',
+    inputSchema: {
+      type: 'object',
+      properties: { session_id: { type: 'string' } },
+      required: ['session_id'],
+    },
+  },
+  {
     name: 'debug_quit',
     description: 'Kill a debug session and its process.',
     inputSchema: {
@@ -227,6 +236,18 @@ server.setRequestHandler(CallToolRequestSchema, async (req) => {
         const session = manager.get(session_id);
         const paused = await session.stepOut();
         return text(formatPaused(session, paused));
+      }
+
+      case 'debug_backtrace': {
+        const { session_id } = args as { session_id: string };
+        const session = manager.get(session_id);
+        const frames = session.backtrace();
+        const lines = frames.map(f => {
+          const loc = f.file ? `${f.file}:${f.line}:${f.column}` : '(native)';
+          const fn = f.function || '(anonymous)';
+          return `  #${f.frame}  ${fn}  —  ${loc}`;
+        });
+        return text(`Call stack (${frames.length} frame${frames.length !== 1 ? 's' : ''}):\n${lines.join('\n')}`);
       }
 
       case 'debug_quit': {
