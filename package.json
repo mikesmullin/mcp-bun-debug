@@ -1,0 +1,21 @@
+{
+  "name": "mcp-bun-debug",
+  "version": "0.1.0",
+  "description": "MCP stdio server for debugging Bun processes via the Chrome DevTools Protocol",
+  "type": "module",
+  "bin": {
+    "mcp-bun-debug": "./src/index.ts"
+  },
+  "scripts": {
+    "start": "bun src/index.ts",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.29.0",
+    "ws": "^8.20.0"
+  },
+  "devDependencies": {
+    "@types/ws": "^8.18.1",
+    "typescript": "^6.0.3"
+  }
+}
