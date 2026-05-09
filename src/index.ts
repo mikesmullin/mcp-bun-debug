@@ -117,6 +117,21 @@ const TOOLS: Tool[] = [
     },
   },
   {
+    name: 'debug_step_to',
+    description:
+      'Run to a specific line number in the current script using Debugger.continueToLocation. ' +
+      'More reliable than debug_step_over for async functions, where stepOver may skip multiple source lines ' +
+      'in a single async continuation resumption (e.g. after an await expression).',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        session_id: { type: 'string' },
+        line: { type: 'number', description: 'Target line number (1-indexed) in the current script' },
+      },
+      required: ['session_id', 'line'],
+    },
+  },
+  {
     name: 'debug_backtrace',
     description: 'Show the full call stack at the current pause point — use this after any step command to confirm where execution landed.',
     inputSchema: {
@@ -235,6 +250,13 @@ server.setRequestHandler(CallToolRequestSchema, async (req) => {
         const { session_id } = args as { session_id: string };
         const session = manager.get(session_id);
         const paused = await session.stepOut();
+        return text(formatPaused(session, paused));
+      }
+
+      case 'debug_step_to': {
+        const { session_id, line } = args as { session_id: string; line: number };
+        const session = manager.get(session_id);
+        const paused = await session.continueToLine(line);
         return text(formatPaused(session, paused));
       }
 

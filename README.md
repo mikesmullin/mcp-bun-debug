@@ -86,11 +86,11 @@ Set a breakpoint at line 37 and show me what _G contains.
 
 ## Using with Claude Code (VS Code extension)
 
-The [Claude Code VS Code extension](https://marketplace.visualstudio.com/items?itemName=Anthropic.claude-for-vscode) reads MCP server config from `.claude/settings.json` files. Add the server there and Claude will have the debug tools available in every conversation for that workspace.
+The [Claude Code VS Code extension](https://marketplace.visualstudio.com/items?itemName=Anthropic.claude-for-vscode) loads MCP servers from `.mcp.json` files. **Do not use `.claude/settings.json` for this** — `mcpServers` is not a valid key there and will be silently ignored.
 
 ### 1. Register the MCP server
 
-Create or edit `.claude/settings.json` in your workspace root:
+Create or edit `.mcp.json` in your workspace root:
 
 ```json
 {
@@ -103,9 +103,7 @@ Create or edit `.claude/settings.json` in your workspace root:
 }
 ```
 
-For user-wide availability across all projects, put the same block in `~/.claude/settings.json`.
-
-After saving, restart the extension (or run **Claude: Restart MCP Servers** from the command palette). The `bun-debug` server should appear in the MCP panel.
+After saving, reload the VS Code window (**Developer: Reload Window** or `Ctrl+Shift+P → Reload Window`). The `bun-debug` tools will appear as available tools in the next conversation.
 
 ### 2. Load SKILLS.md into context
 

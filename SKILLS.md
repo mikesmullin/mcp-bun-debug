@@ -154,6 +154,39 @@ Execute the current line and pause at the next line in the same function.
 
 **Note:** The result only shows the top frame. If you land somewhere unexpected, call `debug_backtrace` immediately to see the full call stack.
 
+**Known limitation — async functions:** In `async` functions (TypeScript or CoffeeScript), a single `debug_step_over` may skip multiple source lines when the runtime resumes an async continuation. Symptoms: landed at an unexpected line, pause reason is `Breakpoint` instead of `other`, a variable you expected to be initialized is still `undefined`. Use `debug_step_to` instead of `debug_step_over` when paused inside an async function.
+
+---
+
+### `debug_step_to`
+Run to a specific line number in the current script using `Debugger.continueToLocation`. Reliable for async functions where `debug_step_over` may jump too far.
+
+**Inputs:**
+| field | type | required | description |
+|-------|------|----------|-------------|
+| `session_id` | string | ✓ | |
+| `line` | number | ✓ | Target line number (1-indexed) in the **same script** currently paused |
+
+**Returns:** `Paused at <file>:<line> in <function>()  (reason: other)`
+
+**When to use:**
+- Paused inside an `async` function or after an `await` expression
+- `debug_step_over` just landed on the wrong line (skipped lines in an async continuation)
+- You want to advance exactly to a known line number without risking overshooting
+
+**Example — async step-over workaround:**
+```
+# Paused at page.coffee:20 inside an async function
+debug_step_over session_id=abc123
+# → Landed at line 25 (skipped the assignment on line 20!), reason: Breakpoint
+
+# Correct approach:
+debug_step_to session_id=abc123 line=21
+# → Paused at page.coffee:21  (reason: other)  ✓
+debug_get_variable session_id=abc123 expression=now
+# → now = "2026-05-09T19:18:08.711Z"  ✓
+```
+
 ---
 
 ### `debug_step_into`

@@ -245,6 +245,22 @@ export class BunDebugSession {
     return (await nextPause) as unknown as PausedState;
   }
 
+  // Use continueToLocation instead of stepOver for async functions where stepOver
+  // may skip multiple source lines in a single async continuation resumption.
+  async continueToLine(line: number): Promise<PausedState> {
+    const frame = this.pausedState?.callFrames[0];
+    if (!frame) throw new Error('Not paused');
+    const nextPause = this.waitFor('Debugger.paused', 30000);
+    await this.send('Debugger.continueToLocation', {
+      location: {
+        scriptId: frame.location.scriptId,
+        lineNumber: line - 1,  // CDP is 0-indexed
+        columnNumber: 0,
+      },
+    });
+    return (await nextPause) as unknown as PausedState;
+  }
+
   async getProperties(objectId: string): Promise<PropertyDescriptor[]> {
     const res = await this.send('Runtime.getProperties', {
       objectId,
