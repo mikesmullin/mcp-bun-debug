@@ -8,12 +8,17 @@ All tools communicate over stdio with the `mcp-bun-debug` server.
 ## Quick-start workflow
 
 ```
-1. debug_launch       → get session_id
-2. debug_set_breakpoint (optional, before continuing)
-3. debug_continue / debug_step_over / debug_step_into / debug_step_out
-4. debug_list_variables / debug_get_variable / debug_set_variable
+1. debug_launch            → get session_id; note the initial pause location
+2. debug_set_breakpoint    → set breakpoints in YOUR script (not the built-in the process is currently paused in)
+3. debug_continue          → run to your first breakpoint
+4. debug_list_variables / debug_get_variable / debug_step_over / ...
 5. debug_quit when done
 ```
+
+**Critical:** after launch the process is paused inside the first loaded module, which may be
+a Node.js built-in (`node:fs/promises`, `node:path`, etc.) rather than your script.
+Always set at least one breakpoint in your target file before calling `debug_continue`, or
+the 30-second timeout will expire with nothing to show.
 
 ---
 
@@ -27,7 +32,8 @@ List all active debug sessions with their state, pid, port, and current pause lo
 ---
 
 ### `debug_launch`
-Start a script under Bun's `--inspect-brk` debugger. The process **pauses at entry** — no code runs until you step or continue.
+Start a script under Bun's `--inspect-brk` debugger. The process pauses immediately at the
+entry of the first loaded module — which may be a preloaded built-in, not your script.
 
 **Inputs:**
 | field | type | required | description |
@@ -41,45 +47,55 @@ Start a script under Bun's `--inspect-brk` debugger. The process **pauses at ent
 Launched session [abc123]
 pid=12345  port=42001  state=paused
 log: /tmp/bun-debug-abc123.log
-Paused at: /workspace/project/index.ts:1 in (anonymous)()
+Paused at: node:fs/promises:1 in node:fs/promises()
 ```
 
 **Notes:**
 - `session_id` is the 6-char hex ID shown in brackets, e.g. `abc123`
-- stdout/stderr from the target process are written to the log file
-- The log file path is useful for checking runtime output after stepping
+- The initial pause location is often a Node built-in — this is normal. Set a breakpoint in your script before continuing.
+- stdout/stderr from the target process are written to the log file; check it if the process errors on startup.
 
 ---
 
 ### `debug_set_breakpoint`
-Set a breakpoint at a source file + line number. Safe to call before or after `debug_continue`.
+Set a breakpoint at a source file + line number.
 
 **Inputs:**
 | field | type | required | description |
 |-------|------|----------|-------------|
 | `session_id` | string | ✓ | |
-| `file` | string | ✓ | File path relative to cwd, or absolute |
+| `file` | string | ✓ | File path relative to `cwd`, or absolute |
 | `line` | number | ✓ | Line number (1-indexed) |
 
 **Returns:** `Breakpoint set: id=<bp_id>  resolved at line <n>`
 
-**Tip:** Set all breakpoints before calling `debug_continue` for the first time.
+**Notes:**
+- The **resolved line** may differ from the requested line for transpiled files (TypeScript, CoffeeScript). Always read the resolved line from the response — that is the line where execution will actually stop.
+- Breakpoints can be set while paused anywhere, including before the script has started running. Set them immediately after `debug_launch`.
+- Requesting a line that is a comment or blank will snap to the next executable statement.
 
 ---
 
 ### `debug_list_variables`
-List every variable in scope at the current pause point (local, closure, and block scopes).
+List variables in scope at the current pause point. Covers local, block, and closure scopes.
 
 **Inputs:** `session_id`
 
 **Returns:**
 ```
 Variables in scope:
-  req: object = {method: GET, url: /api/users}
-  res: object = {statusCode: 200}
-  config: object = {timeout: 30000}
+  user: object = {id: 1, name: Alice, role: admin}
+  config: object = {timeout: 30000, retries: 3}
   count: number = 42
+  label: string = "active"
+  fetchData: function = async function(url) {…
 ```
+
+**Notes:**
+- Object values are expanded one level deep automatically (`{key: value, …}`).
+- Function-type variables (imports, closures) are shown as a truncated signature (`async function(args) {…`). Use `debug_get_variable` to evaluate them if needed.
+- Variables declared on the **current line** (the line you're paused at) have not been initialized yet and will not appear, or will throw a `ReferenceError` if evaluated — step over once to initialize them.
+- For modules with many imports the list can be long. Use `debug_get_variable` with a specific name for targeted inspection.
 
 ---
 
@@ -90,9 +106,13 @@ Evaluate a variable name or any JavaScript expression at the current pause point
 | field | type | description |
 |-------|------|-------------|
 | `session_id` | string | |
-| `expression` | string | Variable name or JS expression, e.g. `user.email`, `arr.length`, `JSON.stringify(config)` |
+| `expression` | string | Variable name or JS expression, e.g. `user.email`, `arr.length`, `JSON.stringify(config, null, 2)` |
 
 **Returns:** `<expression> = <value>`
+
+**Notes:**
+- Evaluating a variable declared on the current line (not yet initialized) returns a `ReferenceError` — step over once first.
+- Full JS expressions work: `Object.keys(config)`, `users.filter(u => u.role === "admin")`, etc.
 
 ---
 
@@ -104,9 +124,13 @@ Assign a new value to a variable at the current pause point.
 |-------|------|-------------|
 | `session_id` | string | |
 | `name` | string | Variable name |
-| `value` | string | New value as a JS expression: `"42"`, `'"hello"'`, `'[1,2,3]'`, `'null'` |
+| `value` | string | New value as a JS expression: `"42"`, `'"hello"'`, `'[1,2,3]'`, `'null'`, `'{ ...user, role: "admin" }'` |
 
 **Returns:** `<name> = <new_value>`
+
+**Notes:**
+- Only works for `let` and `var` bindings. Attempting to reassign a `const` returns `TypeError: Attempted to assign to readonly property`.
+- The value is evaluated as a JS expression in the current scope, so you can reference other local variables: `value='{ ...config, debug: true }'`.
 
 ---
 
@@ -115,9 +139,9 @@ Resume execution and pause at the next breakpoint.
 
 **Inputs:** `session_id`
 
-**Returns:** `Paused at <file>:<line> in <function>()  (reason: breakpoint)`
+**Returns:** `Paused at <file>:<line> in <function>()  (reason: Breakpoint)`
 
-**Warning:** If no breakpoint is hit, this will wait indefinitely (up to 30 s timeout). Always set breakpoints before continuing into long-running code.
+**Warning:** Waits up to 30 seconds for the next pause. If no breakpoint is ever hit (process finishes or loops forever without hitting one), the call times out with `Timeout waiting for Debugger.paused`. Always set at least one breakpoint before calling this.
 
 ---
 
@@ -125,23 +149,25 @@ Resume execution and pause at the next breakpoint.
 Execute the current line and pause at the next line in the same function.
 
 **Inputs:** `session_id`  
-**Returns:** new pause location
+**Returns:** `Paused at <file>:<line> in <function>()  (reason: other)`
 
 ---
 
 ### `debug_step_into`
-Step into the function being called on the current line.
+Step into the function call on the current line.
 
 **Inputs:** `session_id`  
-**Returns:** new pause location (inside the callee)
+**Returns:** `Paused at <file>:<line> in <function>()  (reason: other)` — inside the callee
+
+**Note:** Stepping into a native or built-in function may land in internal runtime code. Use `debug_step_out` to return to your script.
 
 ---
 
 ### `debug_step_out`
-Finish the current function and pause at the call site.
+Run to the end of the current function and pause at the call site.
 
 **Inputs:** `session_id`  
-**Returns:** new pause location (in the caller)
+**Returns:** `Paused at <file>:<line> in <function>()  (reason: other)` — back in the caller
 
 ---
 
@@ -154,35 +180,65 @@ Kill the debug session and its child process.
 
 ## Common patterns
 
-### Inspect a variable deep in a call stack
+### Inspect a specific variable in a function
 ```
 debug_launch cwd=/workspace/project script=src/server.ts
+# Check where we're paused first — likely a built-in
+debug_list_sessions
+# Set breakpoints in our target file before continuing
 debug_set_breakpoint session_id=abc123 file=src/handlers/user.ts line=47
 debug_continue session_id=abc123
-debug_list_variables session_id=abc123
+# Now paused at line 47 (or the resolved line shown by set_breakpoint)
 debug_get_variable session_id=abc123 expression="JSON.stringify(req.body, null, 2)"
 debug_quit session_id=abc123
 ```
 
-### Patch a value at runtime to test a branch
+### Step through a function and watch state change
 ```
-debug_set_variable session_id=abc123 name=featureEnabled value=true
+debug_set_breakpoint session_id=abc123 file=src/process.ts line=20
+debug_continue session_id=abc123
+debug_list_variables session_id=abc123      # see initial state
+debug_step_over session_id=abc123           # execute line 20
+debug_list_variables session_id=abc123      # see updated state
 debug_step_over session_id=abc123
+debug_get_variable session_id=abc123 expression=result
 ```
 
-### Check what an async function returns
+### Patch a let/var value to force a branch
 ```
-debug_step_into session_id=abc123   # enter the async fn
-debug_step_out session_id=abc123    # run to completion
+# Paused before the if-check
+debug_get_variable session_id=abc123 expression=featureFlag   # currently false
+debug_set_variable session_id=abc123 name=featureFlag value=true
+debug_step_over session_id=abc123   # now takes the true branch
+```
+
+### Inspect what an async function returns
+```
+debug_step_into session_id=abc123    # enter the async function
+debug_step_out  session_id=abc123    # run it to completion, return to caller
 debug_get_variable session_id=abc123 expression=result
+```
+
+### Debug a CoffeeScript or TypeScript file
+```
+# Bun transpiles automatically — use the source file path and source line numbers.
+# The resolved line in the set_breakpoint response is the authoritative stop line.
+debug_launch cwd=/workspace/agl-agents script=personal-email/agent.coffee
+debug_set_breakpoint session_id=abc123 file=personal-email/agent.coffee line=37
+# Response: "resolved at line 38" — that is where execution will stop
+debug_continue session_id=abc123
+debug_get_variable session_id=abc123 expression=_G
 ```
 
 ---
 
-## Error handling
+## Error reference
 
-All tools return `Error: <message>` when something goes wrong:
-- `Not paused` — call a step/continue command first
-- `No session with id "xyz"` — session doesn't exist; call `debug_list_sessions`
-- `Session "xyz" has exited` — process crashed or finished; check the log file
-- `Timeout waiting for Debugger.paused` — the process ran past all breakpoints
+| Error | Meaning | Fix |
+|-------|---------|-----|
+| `Not paused` | Called a variable/step tool while running | Wait for a breakpoint; set one and call `debug_continue` |
+| `No session with id "xyz"` | Session ID doesn't exist | Call `debug_list_sessions` to see active IDs |
+| `Session "xyz" has exited` | Process crashed or finished | Check the log file path from `debug_list_sessions` |
+| `Timeout waiting for Debugger.paused` | No breakpoint was hit within 30 s | Set a breakpoint closer to the code path being executed |
+| `ReferenceError: Cannot access 'X' before initialization` | Variable X is declared on the current line (TDZ) | Step over once, then evaluate |
+| `TypeError: Attempted to assign to readonly property` | Variable is `const` | Only `let`/`var` can be reassigned with `debug_set_variable` |
